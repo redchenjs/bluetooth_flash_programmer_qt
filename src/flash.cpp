@@ -135,7 +135,9 @@ int flash_class::erase_all(const QString &devname)
     m_device->waitForBytesWritten();
     while (m_device_rsp == 0) {
         QThread::msleep(20);
-        m_device->waitForReadyRead();
+        if (m_device_rsp == 0) {
+            m_device->waitForReadyRead();
+        }
     }
     // error
     if (m_device_rsp == 2) {
@@ -170,7 +172,9 @@ int flash_class::erase(const QString &devname, uint32_t addr, uint32_t length)
     m_device->waitForBytesWritten();
     while (m_device_rsp == 0) {
         QThread::msleep(20);
-        m_device->waitForReadyRead();
+        if (m_device_rsp == 0) {
+            m_device->waitForReadyRead();
+        }
     }
     // error
     if (m_device_rsp == 2) {
@@ -222,7 +226,9 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
     m_device->waitForBytesWritten();
     while (m_device_rsp == 0) {
         QThread::msleep(20);
-        m_device->waitForReadyRead();
+        if (m_device_rsp == 0) {
+            m_device->waitForReadyRead();
+        }
     }
     // error
     if (m_device_rsp == 2) {
@@ -257,7 +263,9 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
     m_device->waitForBytesWritten();
     while (m_device_rsp == 0) {
         QThread::msleep(20);
-        m_device->waitForReadyRead();
+        if (m_device_rsp == 0) {
+            m_device->waitForReadyRead();
+        }
     }
     // error
     if (m_device_rsp == 2) {
@@ -309,7 +317,9 @@ int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QS
     m_device->waitForBytesWritten();
     while (m_device_rsp == 0) {
         QThread::msleep(20);
-        m_device->waitForReadyRead();
+        if (m_device_rsp == 0) {
+            m_device->waitForReadyRead();
+        }
     }
     // error
     if (m_device_rsp == 2) {
@@ -324,7 +334,9 @@ int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QS
     // receive data
     do {
         QThread::msleep(20);
-        m_device->waitForReadyRead();
+        if (data_recv != data_need) {
+            m_device->waitForReadyRead();
+        }
         std::cout << "<< RECV:" << (data_recv)*100/data_need << "%\r";
     } while (data_recv != data_need);
     std::cout << std::endl;
@@ -356,7 +368,9 @@ int flash_class::info(const QString &devname)
     m_device->waitForBytesWritten();
     while (m_device_rsp == 0) {
         QThread::msleep(20);
-        m_device->waitForReadyRead();
+        if (m_device_rsp == 0) {
+            m_device->waitForReadyRead();
+        }
     }
     // error
     if (m_device_rsp == 2) {
