@@ -254,7 +254,6 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
         }
         // flush every 990 bytes
         if ((i+1) % 990 == 0) {
-            QThread::msleep(10);
             m_device->waitForBytesWritten();
             std::cout << ">> SENT:" << i*100/length << "%\r";
         }
@@ -333,7 +332,6 @@ int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QS
 
     // receive data
     do {
-        QThread::msleep(10);
         if (data_recv != data_need) {
             m_device->waitForReadyRead();
         }
