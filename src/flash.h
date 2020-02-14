@@ -16,6 +16,7 @@ class flash_class : public QObject
     Q_OBJECT
 
 public:
+    void exit(void);
     int exec(int argc, char *argv[]);
 
 private:
@@ -26,13 +27,15 @@ private:
     uint32_t data_need = 0;
     uint32_t data_recv = 0;
 
-    bool send_byte(const char c);
-    bool send_string(QString *s);
-
-    void process_data(void);
+    size_t rw_in_progress = 0;
 
     int open_device(const QString &devname);
     int close_device(void);
+
+    size_t wait_for_response(void);
+    void process_data(void);
+
+    int send_data(const char *data, uint32_t length);
 
     int erase_all(const QString &devname);
     int erase(const QString &devname, uint32_t addr, uint32_t length);

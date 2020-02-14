@@ -15,83 +15,43 @@
 
 #include "flash.h"
 
-bool flash_class::send_byte(const char c)
-{
-    if (!m_device->isOpen()) {
-        return false;
-    }
+#define OK           0
+#define ERR_ARG     -1
+#define ERR_FILE    -2
+#define ERR_DEVICE  -3
+#define ERR_REMOTE  -4
 
-    if ((m_device->write(&c, 1)) < 1) {
-        return false;
-    }
+#define CMD_FMT_ERASE_ALL   "MTD+ERASE:ALL!"
+#define CMD_FMT_ERASE       "MTD+ERASE:0x%x+0x%x"
+#define CMD_FMT_WRITE       "MTD+WRITE:0x%x+0x%x"
+#define CMD_FMT_READ        "MTD+READ:0x%x+0x%x"
+#define CMD_FMT_INFO        "MTD+INFO?"
 
-    return true;
-}
+enum cmd_idx {
+    CMD_IDX_ERASE_ALL = 0x0,
+    CMD_IDX_ERASE     = 0x1,
+    CMD_IDX_WRITE     = 0x2,
+    CMD_IDX_READ      = 0x3,
+    CMD_IDX_INFO      = 0x4,
+};
 
-bool flash_class::send_string(QString *s)
-{
-    QByteArray bytes;
-    bytes.reserve(s->size());
-    for (auto &c : *s) {
-        bytes.append(static_cast<char>(c.unicode()));
-    }
+enum rsp_idx {
+    RSP_IDX_NONE  = 0x0,
+    RSP_IDX_TRUE  = 0x1,
+    RSP_IDX_FALSE = 0x2,
+};
 
-    for (int i=0; i<bytes.length(); i++) {
-        if (!send_byte(bytes[i])) {
-            return false;
-        }
-    }
+typedef struct {
+    const bool flag;
+    const char fmt[32];
+} rsp_fmt_t;
 
-    if (!send_byte('\r') || !send_byte('\n')) {
-        return false;
-    }
-
-    return true;
-}
-
-void flash_class::process_data(void)
-{
-    static uint8_t read_in_progress = 0;
-    QByteArray data = m_device->readAll();
-
-    if (!read_in_progress) {
-        if (strncmp(data.data(), "OK\r\n", 4) == 0) {
-            m_device_rsp = 1;
-            std::cout << "<< " << data.data();
-            return;
-        } else if (strncmp(data.data(), "DONE\r\n", 6) == 0) {
-            m_device_rsp = 1;
-            std::cout << "<< " << data.data();
-            return;
-        } else if (strncmp(data.data(), "FAIL\r\n", 6) == 0) {
-            m_device_rsp = 2;
-            std::cout << "<< " << data.data();
-            return;
-        } else if (strncmp(data.data(), "ERROR\r\n", 7) == 0) {
-            m_device_rsp = 2;
-            std::cout << "<< " << data.data();
-            return;
-        } else if (strncmp(data.data(), "INFO:", 5) == 0) {
-            m_device_rsp = 1;
-            std::cout << "<< " << data.data();
-            return;
-        }
-        m_device_rsp = 1;
-        read_in_progress = 1;
-    }
-    if (data.size() > 0 && data_fd != nullptr && data_recv != data_need) {
-        if ((data_need - data_recv) < static_cast<uint32_t>(data.size())) {
-            data_fd->write(data, data_need - data_recv);
-            data_recv += data_need - data_recv;
-        } else {
-            data_fd->write(data, data.size());
-            data_recv += static_cast<uint32_t>(data.size());
-        }
-        if (data_recv == data_need) {
-            read_in_progress = 0;
-        }
-    }
-}
+static const rsp_fmt_t rsp_fmt[] = {
+    {  true, "OK\r\n" },     // OK
+    {  true, "DONE\r\n" },   // Done
+    { false, "FAIL\r\n" },   // Fail
+    { false, "ERROR\r\n" },  // Error
+};
 
 int flash_class::open_device(const QString &devname)
 {
@@ -105,10 +65,10 @@ int flash_class::open_device(const QString &devname)
         m_device->flush();
     } else {
         std::cout << "could not open device" << std::endl;
-        return -1;
+        return ERR_DEVICE;
     }
 
-    return 0;
+    return OK;
 }
 
 int flash_class::close_device(void)
@@ -116,270 +76,327 @@ int flash_class::close_device(void)
     m_device->clearError();
     m_device->close();
 
-    return 0;
+    return OK;
+}
+
+void flash_class::process_data(void)
+{
+    QByteArray data = m_device->readAll();
+
+    char *data_buff = data.data();
+    uint32_t data_size = static_cast<uint32_t>(data.size());
+
+    for (uint8_t i=0; i<sizeof(rsp_fmt)/sizeof(rsp_fmt_t); i++) {
+        if (strncmp(data_buff, rsp_fmt[i].fmt, strlen(rsp_fmt[i].fmt)) == 0) {
+            if (rsp_fmt[i].flag == true) {
+                m_device_rsp = RSP_IDX_TRUE;
+            } else {
+                m_device_rsp = RSP_IDX_FALSE;
+                if (rw_in_progress) {
+                    std::cout << std::endl;
+                }
+            }
+            if (data_size == strlen(rsp_fmt[i].fmt)) {
+                std::cout << "<< " << data_buff;
+                return;
+            }
+        }
+    }
+
+    if (data_size > 0 && data_fd != nullptr && data_recv != data_need) {
+        if ((data_need - data_recv) < data_size) {
+            data_fd->write(data_buff, data_need - data_recv);
+            data_recv += data_need - data_recv;
+        } else {
+            data_fd->write(data, data_size);
+            data_recv += data_size;
+        }
+    } else {
+        m_device_rsp = RSP_IDX_TRUE;
+        std::cout << "<< " << data_buff;
+    }
+}
+
+size_t flash_class::wait_for_response(void)
+{
+    while (m_device_rsp == RSP_IDX_NONE) {
+        QThread::msleep(10);
+        if (m_device_rsp == RSP_IDX_NONE) {
+            m_device->waitForReadyRead();
+        }
+    }
+
+    return m_device_rsp;
+}
+
+int flash_class::send_data(const char *data, uint32_t length)
+{
+    if (m_device->write(data, length) < 1) {
+        return ERR_DEVICE;
+    }
+
+    m_device->waitForBytesWritten();
+
+    return OK;
 }
 
 int flash_class::erase_all(const QString &devname)
 {
-    // open serial device
-    if (open_device(devname)) {
-        return -1;
-    }
-
-    // send chip erase command
+    int ret = OK;
     char cmd_str[32] = {0};
-    snprintf(cmd_str, sizeof(cmd_str), "MTD+ERASE:ALL!");
-    std::cout << ">> " << cmd_str << std::endl;
-    QString cmd = cmd_str;
-    send_string(&cmd);
-    m_device->waitForBytesWritten();
-    while (m_device_rsp == 0) {
-        QThread::msleep(10);
-        if (m_device_rsp == 0) {
-            m_device->waitForReadyRead();
-        }
-    }
-    // error
-    if (m_device_rsp == 2) {
-        // close serial device
-        close_device();
-        return -3;
-    }
-    m_device_rsp = 0;
 
-    // close serial device
-    return close_device();
+    if (open_device(devname)) {
+        return ERR_DEVICE;
+    }
+
+    // send command
+    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_ERASE_ALL"\r\n");
+    std::cout << ">> " << cmd_str;
+
+    m_device_rsp = RSP_IDX_NONE;
+    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
+    if (ret != OK) {
+        close_device();
+        return ret;
+    }
+
+    if (wait_for_response() == RSP_IDX_FALSE) {
+        return ERR_REMOTE;
+    }
+
+    close_device();
+
+    return ret;
 }
 
 int flash_class::erase(const QString &devname, uint32_t addr, uint32_t length)
 {
-    if (length <= 0) {
-        std::cout << "invalid length" << std::endl;
-        return -2;
-    }
-
-    // open serial device
-    if (open_device(devname)) {
-        return -1;
-    }
-
-    // send erase command
+    int ret = OK;
     char cmd_str[32] = {0};
-    snprintf(cmd_str, sizeof(cmd_str), "MTD+ERASE:0x%x+0x%x", addr, length);
-    std::cout << ">> " << cmd_str << std::endl;
-    QString cmd = cmd_str;
-    send_string(&cmd);
-    m_device->waitForBytesWritten();
-    while (m_device_rsp == 0) {
-        QThread::msleep(10);
-        if (m_device_rsp == 0) {
-            m_device->waitForReadyRead();
-        }
-    }
-    // error
-    if (m_device_rsp == 2) {
-        // close serial device
-        close_device();
-        return -3;
-    }
-    m_device_rsp = 0;
 
-    // close serial device
-    return close_device();
+    if (open_device(devname)) {
+        return ERR_DEVICE;
+    }
+
+    // send command
+    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_ERASE"\r\n", addr, length);
+    std::cout << ">> " << cmd_str;
+
+    m_device_rsp = RSP_IDX_NONE;
+    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
+    if (ret != OK) {
+        close_device();
+        return ret;
+    }
+
+    if (wait_for_response() == RSP_IDX_FALSE) {
+        return ERR_REMOTE;
+    }
+
+    close_device();
+
+    return ret;
 }
 
 int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, QString filename)
 {
+    int ret = OK;
+    char cmd_str[32] = {0};
+    char data_buff[990] = {0};
+
     if (length <= 0) {
         std::cout << "invalid length" << std::endl;
-        return -2;
+        return ERR_ARG;
     }
 
-    // open data file
     QFile fd(filename);
     if (!fd.open(QIODevice::ReadOnly)) {
         std::cout << "could not open file" << std::endl;
-        return -2;
+        return ERR_FILE;
     }
 
-    uint32_t filesize = static_cast<uint32_t>(fd.size());
-    if (filesize < length) {
-        std::cout << "length should not be larger than actual file size" << std::endl;
-        // close data file
-        fd.close();
-        return -2;
-    }
-
-    // open serial device
     if (open_device(devname)) {
-        // close data file
         fd.close();
-        return -1;
+        return ERR_DEVICE;
     }
 
-    // send write command
-    char cmd_str[32] = {0};
-    snprintf(cmd_str, sizeof(cmd_str), "MTD+WRITE:0x%x+0x%x", addr, length);
-    std::cout << ">> " << cmd_str << std::endl;
-    QString cmd = cmd_str;
-    send_string(&cmd);
-    m_device->waitForBytesWritten();
-    while (m_device_rsp == 0) {
-        QThread::msleep(10);
-        if (m_device_rsp == 0) {
-            m_device->waitForReadyRead();
-        }
-    }
-    // error
-    if (m_device_rsp == 2) {
-        // close data file
+    // send command
+    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_WRITE"\r\n", addr, length);
+    std::cout << ">> " << cmd_str;
+
+    m_device_rsp = RSP_IDX_NONE;
+    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
+    if (ret != OK) {
         fd.close();
-        // close serial device
         close_device();
-        return -3;
+        return ret;
     }
-    m_device_rsp = 0;
+
+    if (wait_for_response() == RSP_IDX_FALSE) {
+        fd.close();
+        close_device();
+        return ERR_REMOTE;
+    }
 
     // send data
-    QByteArray filedata = fd.readAll();
-    for (size_t i=0; i<length; i++) {
-        bool rc = send_byte(filedata.at(static_cast<int>(i)));
-        if (!rc) {
-            std::cout << "write failed" << std::endl;
-            // close data file
+    rw_in_progress = 1;
+
+    m_device_rsp = RSP_IDX_NONE;
+    std::cout << ">> SENT:" << "0%\r";
+
+    uint32_t pkt = 0;
+    for (pkt=0; pkt<length/990; pkt++) {
+        if (fd.read(data_buff, 990) != 990) {
             fd.close();
-            // close serial device
             close_device();
-            return -4;
+            return ERR_FILE;
         }
-        // flush every 990 bytes
-        if ((i+1) % 990 == 0) {
-            m_device->waitForBytesWritten();
-            std::cout << ">> SENT:" << i*100/length << "%\r";
+
+        ret = send_data(data_buff, 990);
+        if (ret != OK) {
+            fd.close();
+            close_device();
+            return ret;
         }
+
+        if (m_device_rsp == RSP_IDX_FALSE) {
+            fd.close();
+            close_device();
+            return ERR_REMOTE;
+        }
+
+        std::cout << ">> SENT:" << pkt*990*100/length << "%\r";
     }
+
+    uint32_t data_remain = length - pkt * 990;
+    if (data_remain != 0 && data_remain < 990) {
+        if (fd.read(data_buff, data_remain) != data_remain) {
+            fd.close();
+            close_device();
+            return ERR_FILE;
+        }
+
+        ret = send_data(data_buff, data_remain);
+        if (ret != OK) {
+            fd.close();
+            close_device();
+            return ret;
+        }
+
+        if (m_device_rsp == RSP_IDX_FALSE) {
+            fd.close();
+            close_device();
+            return ERR_REMOTE;
+        }
+
+        std::cout << ">> SENT:" << (data_remain+pkt*990)*100/length << "%\r";
+    }
+
     std::cout << std::endl;
-    m_device->waitForBytesWritten();
-    while (m_device_rsp == 0) {
-        QThread::msleep(10);
-        if (m_device_rsp == 0) {
-            m_device->waitForReadyRead();
-        }
-    }
-    // error
-    if (m_device_rsp == 2) {
-        // close data file
-        fd.close();
-        // close serial device
-        close_device();
-        return -3;
-    }
-    m_device_rsp = 0;
+    rw_in_progress = 0;
 
-    // close data file
+    wait_for_response();
+
     fd.close();
+    close_device();
 
-    // close serial device
-    return close_device();
+    return ret;
 }
 
 int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QString filename)
 {
-    if (length <= 0) {
-        std::cout << "invalid length" << std::endl;
-        return -2;
-    }
+    int ret = OK;
+    char cmd_str[32] = {0};
 
-    // open data file
     QFile fd(filename);
     if (!fd.open(QIODevice::WriteOnly)) {
         std::cout << "could not open file" << std::endl;
-        return -2;
+        return ERR_FILE;
     }
 
-    // open serial device
     if (open_device(devname)) {
-        // close data file
         fd.close();
-        return -1;
+        return ERR_DEVICE;
     }
 
-    // send read command
-    data_fd = &fd;
-    data_need = length;
-    data_recv = 0;
-    char cmd_str[32] = {0};
-    snprintf(cmd_str, sizeof(cmd_str), "MTD+READ:0x%x+0x%x", addr, length);
-    std::cout << ">> " << cmd_str << std::endl;
-    QString cmd = cmd_str;
-    send_string(&cmd);
-    m_device->waitForBytesWritten();
-    while (m_device_rsp == 0) {
-        QThread::msleep(10);
-        if (m_device_rsp == 0) {
-            m_device->waitForReadyRead();
-        }
-    }
-    // error
-    if (m_device_rsp == 2) {
-        // close data file
+    // send command
+    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_READ"\r\n", addr, length);
+    std::cout << ">> " << cmd_str;
+
+    data_fd = &fd; data_need = length; data_recv = 0;
+
+    m_device_rsp = RSP_IDX_NONE;
+    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
+    if (ret != OK) {
         fd.close();
-        // close serial device
         close_device();
-        return -3;
+        return ret;
     }
-    m_device_rsp = 0;
+
+    if (wait_for_response() == RSP_IDX_FALSE) {
+        fd.close();
+        close_device();
+        return ERR_REMOTE;
+    }
 
     // receive data
+    rw_in_progress = 1;
+
+    m_device_rsp = RSP_IDX_NONE;
+    std::cout << "<< RECV:" << data_recv*100/data_need << "%\r";
+
     do {
         if (data_recv != data_need) {
             m_device->waitForReadyRead();
         }
-        std::cout << "<< RECV:" << (data_recv)*100/data_need << "%\r";
+
+        if (m_device_rsp == RSP_IDX_FALSE) {
+            fd.close();
+            close_device();
+            return ERR_REMOTE;
+        }
+
+        std::cout << "<< RECV:" << data_recv*100/data_need << "%\r";
     } while (data_recv != data_need);
-    std::cout << std::endl;
-    std::cout << "<< DONE" << std::endl;
-    data_fd = nullptr;
-    data_need = 0;
-    data_recv = 0;
 
-    // close data file
+    std::cout << std::endl << "<< DONE" << std::endl;
+    rw_in_progress = 0;
+
+    data_fd = nullptr; data_need = 0; data_recv = 0;
+
     fd.close();
+    close_device();
 
-    // close serial device
-    return close_device();
+    return ret;
 }
 
 int flash_class::info(const QString &devname)
 {
-    // open serial device
-    if (open_device(devname)) {
-        return -1;
-    }
-
-    // send info command
+    int ret = OK;
     char cmd_str[32] = {0};
-    snprintf(cmd_str, sizeof(cmd_str), "MTD+INFO?");
-    std::cout << ">> " << cmd_str << std::endl;
-    QString cmd = cmd_str;
-    send_string(&cmd);
-    m_device->waitForBytesWritten();
-    while (m_device_rsp == 0) {
-        QThread::msleep(10);
-        if (m_device_rsp == 0) {
-            m_device->waitForReadyRead();
-        }
-    }
-    // error
-    if (m_device_rsp == 2) {
-        // close serial device
-        close_device();
-        return -3;
-    }
-    m_device_rsp = 0;
 
-    // close serial device
-    return close_device();
+    if (open_device(devname)) {
+        return ERR_DEVICE;
+    }
+
+    // send command
+    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_INFO"\r\n");
+    std::cout << ">> " << cmd_str;
+
+    m_device_rsp = RSP_IDX_NONE;
+    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
+    if (ret != OK) {
+        close_device();
+        return ret;
+    }
+
+    if (wait_for_response() == RSP_IDX_FALSE) {
+        return ERR_REMOTE;
+    }
+
+    close_device();
+
+    return ret;
 }
 
 void flash_class::print_usage(void)
@@ -394,45 +411,73 @@ void flash_class::print_usage(void)
     std::cout << "    info\t\t\tread flash info" << std::endl;
 }
 
+void flash_class::exit(void)
+{
+    if (rw_in_progress) {
+        std::cout << std::endl;
+    }
+
+    close_device();
+}
+
 int flash_class::exec(int argc, char *argv[])
 {
-    int res = 0;
+    int ret = OK;
 
     if (argc < 3) {
         print_usage();
-        return -1;
+        return ERR_ARG;
     }
+
+    QString devname = QString(argv[1]);
+    QString options = QString(argv[2]);
 
     std::cout << std::unitbuf;
 
     m_device = new QSerialPort(this);
     connect(m_device, &QSerialPort::readyRead, this, &flash_class::process_data);
 
-    QString devname = QString(argv[1]);
-    QString options = QString(argv[2]);
-
     if (options == "erase_all" && argc == 3) {
-        res = erase_all(devname);
+        ret = erase_all(devname);
     } else if (options == "erase" && argc == 5) {
         uint32_t addr = static_cast<uint32_t>(std::stoul(argv[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
-        res = erase(devname, addr, length);
+
+        if (length <= 0) {
+            std::cout << "invalid length" << std::endl;
+            return ERR_ARG;
+        }
+
+        ret = erase(devname, addr, length);
     } else if (options == "write" && argc == 6) {
         uint32_t addr = static_cast<uint32_t>(std::stoul(argv[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
         QString filename = QString(argv[5]);
-        res = write(devname, addr, length, filename);
+
+        if (length <= 0) {
+            std::cout << "invalid length" << std::endl;
+            return ERR_ARG;
+        }
+
+        ret = write(devname, addr, length, filename);
     } else if (options == "read" && argc == 6) {
         uint32_t addr = static_cast<uint32_t>(std::stoul(argv[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
         QString filename = QString(argv[5]);
-        res = read(devname, addr, length, filename);
+
+        if (length <= 0) {
+            std::cout << "invalid length" << std::endl;
+            return ERR_ARG;
+        }
+
+        ret = read(devname, addr, length, filename);
     } else if (options == "info" && argc == 3) {
-        res = info(devname);
+        ret = info(devname);
     } else {
         print_usage();
-        return -1;
+
+        return ERR_ARG;
     }
 
-    return res;
+    return ret;
 }

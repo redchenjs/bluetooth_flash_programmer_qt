@@ -6,6 +6,7 @@
  */
 
 #include <time.h>
+#include <signal.h>
 #include <sys/stat.h>
 
 #include <QtGlobal>
@@ -14,6 +15,8 @@
 
 #define LOG_FILE_PATH "/tmp/spp-flash-programmer.log"
 #define LOG_FILE_MAX_LEN 2048
+
+flash_class flash;
 
 void msg_handle(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
@@ -61,11 +64,18 @@ void msg_handle(QtMsgType type, const QMessageLogContext &context, const QString
     fclose(fp);
 }
 
+void sig_handle(int signum)
+{
+    flash.exit();
+}
+
 int main(int argc, char *argv[])
 {
     qInstallMessageHandler(msg_handle);
 
-    flash_class flash;
+    signal(SIGINT, sig_handle);
+    signal(SIGTERM, sig_handle);
+    signal(SIGKILL, sig_handle);
 
     return flash.exec(argc, argv);
 }
