@@ -122,7 +122,7 @@ size_t flash_class::wait_for_response(void)
     while (m_device_rsp == RSP_IDX_NONE) {
         QThread::msleep(10);
         if (m_device_rsp == RSP_IDX_NONE) {
-            m_device->waitForReadyRead();
+            m_device->waitForReadyRead(10);
         }
     }
 
@@ -160,9 +160,7 @@ int flash_class::erase_all(const QString &devname)
         return ret;
     }
 
-    if (wait_for_response() == RSP_IDX_FALSE) {
-        return ERR_REMOTE;
-    }
+    wait_for_response();
 
     close_device();
 
@@ -189,9 +187,7 @@ int flash_class::erase(const QString &devname, uint32_t addr, uint32_t length)
         return ret;
     }
 
-    if (wait_for_response() == RSP_IDX_FALSE) {
-        return ERR_REMOTE;
-    }
+    wait_for_response();
 
     close_device();
 
@@ -351,7 +347,7 @@ int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QS
 
     do {
         if (data_recv != data_need) {
-            m_device->waitForReadyRead();
+            m_device->waitForReadyRead(10);
         }
 
         if (m_device_rsp == RSP_IDX_FALSE) {
@@ -394,9 +390,7 @@ int flash_class::info(const QString &devname)
         return ret;
     }
 
-    if (wait_for_response() == RSP_IDX_FALSE) {
-        return ERR_REMOTE;
-    }
+    wait_for_response();
 
     close_device();
 
