@@ -247,6 +247,7 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
     uint32_t pkt = 0;
     for (pkt=0; pkt<length/990; pkt++) {
         if (fd.read(data_buff, 990) != 990) {
+            std::cout << std::endl << ">> ERROR" << std::endl;
             fd.close();
             close_device();
             return ERR_FILE;
@@ -254,6 +255,7 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
 
         ret = send_data(data_buff, 990);
         if (ret != OK) {
+            std::cout << std::endl << ">> ERROR" << std::endl;
             fd.close();
             close_device();
             return ret;
@@ -271,6 +273,7 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
     uint32_t data_remain = length - pkt * 990;
     if (data_remain != 0 && data_remain < 990) {
         if (fd.read(data_buff, data_remain) != data_remain) {
+            std::cout << std::endl << ">> ERROR" << std::endl;
             fd.close();
             close_device();
             return ERR_FILE;
@@ -278,6 +281,7 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
 
         ret = send_data(data_buff, data_remain);
         if (ret != OK) {
+            std::cout << std::endl << ">> ERROR" << std::endl;
             fd.close();
             close_device();
             return ret;
