@@ -421,7 +421,7 @@ void flash_class::exit(void)
         std::cout << std::endl;
     }
 
-    close_device();
+    m_device_rsp = RSP_IDX_FALSE;
 }
 
 int flash_class::exec(int argc, char *argv[])
