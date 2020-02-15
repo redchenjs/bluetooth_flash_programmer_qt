@@ -52,7 +52,7 @@ static const rsp_fmt_t rsp_fmt[] = {
     { false, "ERROR\r\n" },  // Error
 };
 
-int flash_class::open_device(const QString &devname)
+int FlashProgrammer::open_device(const QString &devname)
 {
     m_device->setPortName(devname);
     if (m_device->open(QIODevice::ReadWrite)) {
@@ -70,7 +70,7 @@ int flash_class::open_device(const QString &devname)
     return OK;
 }
 
-int flash_class::close_device(void)
+int FlashProgrammer::close_device(void)
 {
     m_device->clearError();
     m_device->close();
@@ -78,7 +78,7 @@ int flash_class::close_device(void)
     return OK;
 }
 
-void flash_class::process_data(void)
+void FlashProgrammer::process_data(void)
 {
     QByteArray data = m_device->readAll();
 
@@ -116,19 +116,19 @@ void flash_class::process_data(void)
     }
 }
 
-void flash_class::clear_response(void)
+void FlashProgrammer::clear_response(void)
 {
     m_device_rsp = RSP_IDX_NONE;
 }
 
-size_t flash_class::check_response(void)
+size_t FlashProgrammer::check_response(void)
 {
     m_device->waitForReadyRead();
 
     return m_device_rsp;
 }
 
-size_t flash_class::wait_for_response(void)
+size_t FlashProgrammer::wait_for_response(void)
 {
     while (m_device_rsp == RSP_IDX_NONE) {
         m_device->waitForReadyRead();
@@ -137,7 +137,7 @@ size_t flash_class::wait_for_response(void)
     return m_device_rsp;
 }
 
-int flash_class::send_data(const char *data, uint32_t length)
+int FlashProgrammer::send_data(const char *data, uint32_t length)
 {
     if (m_device->write(data, length) < 1) {
         return ERR_DEVICE;
@@ -148,7 +148,7 @@ int flash_class::send_data(const char *data, uint32_t length)
     return OK;
 }
 
-int flash_class::erase_all(const QString &devname)
+int FlashProgrammer::erase_all(const QString &devname)
 {
     int ret = OK;
     char cmd_str[32] = {0};
@@ -176,7 +176,7 @@ int flash_class::erase_all(const QString &devname)
     return ret;
 }
 
-int flash_class::erase(const QString &devname, uint32_t addr, uint32_t length)
+int FlashProgrammer::erase(const QString &devname, uint32_t addr, uint32_t length)
 {
     int ret = OK;
     char cmd_str[32] = {0};
@@ -204,7 +204,7 @@ int flash_class::erase(const QString &devname, uint32_t addr, uint32_t length)
     return ret;
 }
 
-int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, QString filename)
+int FlashProgrammer::write(const QString &devname, uint32_t addr, uint32_t length, QString filename)
 {
     int ret = OK;
     char cmd_str[32] = {0};
@@ -314,7 +314,7 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
     return ret;
 }
 
-int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QString filename)
+int FlashProgrammer::read(const QString &devname, uint32_t addr, uint32_t length, QString filename)
 {
     int ret = OK;
     char cmd_str[32] = {0};
@@ -378,7 +378,7 @@ int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QS
     return ret;
 }
 
-int flash_class::info(const QString &devname)
+int FlashProgrammer::info(const QString &devname)
 {
     int ret = OK;
     char cmd_str[32] = {0};
@@ -406,7 +406,7 @@ int flash_class::info(const QString &devname)
     return ret;
 }
 
-void flash_class::print_usage(void)
+void FlashProgrammer::print_usage(void)
 {
     std::cout << "Usage:" << std::endl;
     std::cout << "    spp-flash-programmer /dev/rfcommX [OPTIONS]\n" << std::endl;
@@ -418,7 +418,7 @@ void flash_class::print_usage(void)
     std::cout << "    info\t\t\tread flash info" << std::endl;
 }
 
-void flash_class::exit(void)
+void FlashProgrammer::stop(void)
 {
     if (rw_in_progress) {
         std::cout << std::endl;
@@ -427,13 +427,13 @@ void flash_class::exit(void)
     m_device_rsp = RSP_IDX_FALSE;
 }
 
-int flash_class::exec(int argc, char *argv[])
+void FlashProgrammer::start(int argc, char *argv[])
 {
     int ret = OK;
 
     if (argc < 3) {
         print_usage();
-        return ERR_ARG;
+        emit finished(ERR_ARG);
     }
 
     QString devname = QString(argv[1]);
@@ -442,7 +442,7 @@ int flash_class::exec(int argc, char *argv[])
     std::cout << std::unitbuf;
 
     m_device = new QSerialPort(this);
-    connect(m_device, &QSerialPort::readyRead, this, &flash_class::process_data);
+    connect(m_device, &QSerialPort::readyRead, this, &FlashProgrammer::process_data);
 
     if (options == "erase_all" && argc == 3) {
         ret = erase_all(devname);
@@ -452,7 +452,7 @@ int flash_class::exec(int argc, char *argv[])
 
         if (length <= 0) {
             std::cout << "invalid length" << std::endl;
-            return ERR_ARG;
+            emit finished(ERR_ARG);
         }
 
         ret = erase(devname, addr, length);
@@ -463,7 +463,7 @@ int flash_class::exec(int argc, char *argv[])
 
         if (length <= 0) {
             std::cout << "invalid length" << std::endl;
-            return ERR_ARG;
+            emit finished(ERR_ARG);
         }
 
         ret = write(devname, addr, length, filename);
@@ -474,7 +474,7 @@ int flash_class::exec(int argc, char *argv[])
 
         if (length <= 0) {
             std::cout << "invalid length" << std::endl;
-            return ERR_ARG;
+            emit finished(ERR_ARG);
         }
 
         ret = read(devname, addr, length, filename);
@@ -482,9 +482,8 @@ int flash_class::exec(int argc, char *argv[])
         ret = info(devname);
     } else {
         print_usage();
-
-        return ERR_ARG;
+        emit finished(ERR_ARG);
     }
 
-    return ret;
+    emit finished(ret);
 }

@@ -11,13 +11,13 @@
 #include <QtCore>
 #include <QtSerialPort/QSerialPort>
 
-class flash_class : public QObject
+class FlashProgrammer : public QObject
 {
     Q_OBJECT
 
 public:
-    void exit(void);
-    int exec(int argc, char *argv[]);
+    void stop(void);
+    void start(int argc, char *argv[]);
 
 private:
     QSerialPort *m_device = nullptr;
@@ -46,6 +46,9 @@ private:
     int info(const QString &devname);
 
     void print_usage(void);
+
+signals:
+    void finished(int err = 0);
 };
 
 #endif // FLASH_H

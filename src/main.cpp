@@ -5,77 +5,37 @@
  *      Author: Jack Chen <redchenjs@live.com>
  */
 
-#include <time.h>
-#include <signal.h>
-#include <sys/stat.h>
-
+#include <csignal>
 #include <QtGlobal>
 
 #include "flash.h"
 
-#define LOG_FILE_PATH "/tmp/spp-flash-programmer.log"
-#define LOG_FILE_MAX_LEN 2048
+static FlashProgrammer flash;
 
-flash_class flash;
-
-void msg_handle(QtMsgType type, const QMessageLogContext &context, const QString &msg)
+void signalHandle(int signum)
 {
-    FILE *fp = nullptr;
-    struct stat file_stat;
-
-    if (!(stat(LOG_FILE_PATH, &file_stat))) {
-        if (file_stat.st_size >= LOG_FILE_MAX_LEN) {
-            fp = fopen(LOG_FILE_PATH, "w+");
-        } else {
-            fp = fopen(LOG_FILE_PATH, "a+");
-        }
-        if (!fp) {
-            return;
-        }
-    } else {
-        if (!(fp = fopen(LOG_FILE_PATH, "w+"))) {
-            return;
-        }
+    switch (signum) {
+    case SIGINT:
+    case SIGTERM:
+    case SIGKILL:
+        flash.stop();
+        break;
+    default:
+        break;
     }
-
-    char time_str[24];
-    time_t lt = time(nullptr);
-    strftime(time_str, sizeof(time_str), "%Y-%m-%d %I:%M", localtime(&lt));
-
-    QByteArray localMsg = msg.toLocal8Bit();
-    switch (type) {
-    case QtDebugMsg:
-        fprintf(fp, "[%s] Debug: %s (%s:%u, %s)\n", time_str, localMsg.constData(), context.file, context.line, context.function);
-        break;
-    case QtInfoMsg:
-        fprintf(fp, "[%s] Info: %s (%s:%u, %s)\n", time_str, localMsg.constData(), context.file, context.line, context.function);
-        break;
-    case QtWarningMsg:
-        fprintf(fp, "[%s] Warning: %s (%s:%u, %s)\n", time_str, localMsg.constData(), context.file, context.line, context.function);
-        break;
-    case QtCriticalMsg:
-        fprintf(fp, "[%s] Critical: %s (%s:%u, %s)\n", time_str, localMsg.constData(), context.file, context.line, context.function);
-        break;
-    case QtFatalMsg:
-        fprintf(fp, "[%s] Fatal: %s (%s:%u, %s)\n", time_str, localMsg.constData(), context.file, context.line, context.function);
-        abort();
-    }
-
-    fclose(fp);
-}
-
-void sig_handle(int signum)
-{
-    flash.exit();
 }
 
 int main(int argc, char *argv[])
 {
-    qInstallMessageHandler(msg_handle);
+    QCoreApplication app(argc, argv);
 
-    signal(SIGINT, sig_handle);
-    signal(SIGTERM, sig_handle);
-    signal(SIGKILL, sig_handle);
+    signal(SIGINT, signalHandle);
+    signal(SIGTERM, signalHandle);
+    signal(SIGKILL, signalHandle);
 
-    return flash.exec(argc, argv);
+    QObject::connect(&flash, SIGNAL(finished()), &app, SLOT(quit()));
+
+    QTimer::singleShot(0, &flash, [=]()->void{flash.start(argc, argv);});
+
+    return app.exec();
 }
