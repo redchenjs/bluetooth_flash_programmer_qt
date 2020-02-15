@@ -123,7 +123,7 @@ void FlashProgrammer::clear_response(void)
 
 size_t FlashProgrammer::check_response(void)
 {
-    m_device->waitForReadyRead();
+    m_device->waitForReadyRead(10);
 
     return m_device_rsp;
 }
@@ -131,7 +131,7 @@ size_t FlashProgrammer::check_response(void)
 size_t FlashProgrammer::wait_for_response(void)
 {
     while (m_device_rsp == RSP_IDX_NONE) {
-        m_device->waitForReadyRead();
+        m_device->waitForReadyRead(10);
     }
 
     return m_device_rsp;

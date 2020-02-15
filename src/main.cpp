@@ -15,13 +15,13 @@ static FlashProgrammer flash;
 void signalHandle(int signum)
 {
     switch (signum) {
-    case SIGINT:
-    case SIGTERM:
-    case SIGKILL:
-        flash.stop();
-        break;
-    default:
-        break;
+        case SIGINT:
+        case SIGTERM:
+        case SIGKILL:
+            flash.stop();
+            break;
+        default:
+            break;
     }
 }
 
