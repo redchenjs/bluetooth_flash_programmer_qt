@@ -10,7 +10,6 @@
 #include <iostream>
 
 #include <QtCore>
-#include <QThread>
 #include <QtSerialPort/QSerialPort>
 
 #include "flash.h"
@@ -117,13 +116,22 @@ void flash_class::process_data(void)
     }
 }
 
+void flash_class::clear_response(void)
+{
+    m_device_rsp = RSP_IDX_NONE;
+}
+
+size_t flash_class::check_response(void)
+{
+    m_device->waitForReadyRead();
+
+    return m_device_rsp;
+}
+
 size_t flash_class::wait_for_response(void)
 {
     while (m_device_rsp == RSP_IDX_NONE) {
-        QThread::msleep(10);
-        if (m_device_rsp == RSP_IDX_NONE) {
-            m_device->waitForReadyRead(10);
-        }
+        m_device->waitForReadyRead();
     }
 
     return m_device_rsp;
@@ -153,7 +161,8 @@ int flash_class::erase_all(const QString &devname)
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_ERASE_ALL"\r\n");
     std::cout << ">> " << cmd_str;
 
-    m_device_rsp = RSP_IDX_NONE;
+    clear_response();
+
     ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
     if (ret != OK) {
         close_device();
@@ -180,7 +189,8 @@ int flash_class::erase(const QString &devname, uint32_t addr, uint32_t length)
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_ERASE"\r\n", addr, length);
     std::cout << ">> " << cmd_str;
 
-    m_device_rsp = RSP_IDX_NONE;
+    clear_response();
+
     ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
     if (ret != OK) {
         close_device();
@@ -220,7 +230,8 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_WRITE"\r\n", addr, length);
     std::cout << ">> " << cmd_str;
 
-    m_device_rsp = RSP_IDX_NONE;
+    clear_response();
+
     ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
     if (ret != OK) {
         fd.close();
@@ -236,9 +247,9 @@ int flash_class::write(const QString &devname, uint32_t addr, uint32_t length, Q
 
     // send data
     rw_in_progress = 1;
-
-    m_device_rsp = RSP_IDX_NONE;
     std::cout << ">> SENT:" << "0%\r";
+
+    clear_response();
 
     uint32_t pkt = 0;
     for (pkt=0; pkt<length/990; pkt++) {
@@ -325,7 +336,8 @@ int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QS
 
     data_fd = &fd; data_need = length; data_recv = 0;
 
-    m_device_rsp = RSP_IDX_NONE;
+    clear_response();
+
     ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
     if (ret != OK) {
         fd.close();
@@ -341,16 +353,12 @@ int flash_class::read(const QString &devname, uint32_t addr, uint32_t length, QS
 
     // receive data
     rw_in_progress = 1;
-
-    m_device_rsp = RSP_IDX_NONE;
     std::cout << "<< RECV:" << data_recv*100/data_need << "%\r";
 
-    do {
-        if (data_recv != data_need) {
-            m_device->waitForReadyRead(10);
-        }
+    clear_response();
 
-        if (m_device_rsp == RSP_IDX_FALSE) {
+    do {
+        if (check_response() == RSP_IDX_FALSE) {
             fd.close();
             close_device();
             return ERR_REMOTE;
@@ -383,7 +391,8 @@ int flash_class::info(const QString &devname)
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_INFO"\r\n");
     std::cout << ">> " << cmd_str;
 
-    m_device_rsp = RSP_IDX_NONE;
+    clear_response();
+
     ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
     if (ret != OK) {
         close_device();

@@ -32,9 +32,11 @@ private:
     int open_device(const QString &devname);
     int close_device(void);
 
+    void clear_response(void);
+    size_t check_response(void);
     size_t wait_for_response(void);
-    void process_data(void);
 
+    void process_data(void);
     int send_data(const char *data, uint32_t length);
 
     int erase_all(const QString &devname);
