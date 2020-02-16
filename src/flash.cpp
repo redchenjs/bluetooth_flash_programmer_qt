@@ -406,11 +406,11 @@ int FlashProgrammer::info(const QString &devname)
     return ret;
 }
 
-void FlashProgrammer::print_usage(void)
+void FlashProgrammer::print_usage(char *appname)
 {
     std::cout << "Usage:" << std::endl;
-    std::cout << "    spp-flash-programmer /dev/rfcommX [OPTIONS]\n" << std::endl;
-    std::cout << "Options:" << std::endl;
+    std::cout << "    " << appname << " /dev/rfcommX COMMAND\n" << std::endl;
+    std::cout << "Commands:" << std::endl;
     std::cout << "    erase_all\t\t\terase full flash chip" << std::endl;
     std::cout << "    erase addr length\t\terase flash start from [addr] for [length] bytes" << std::endl;
     std::cout << "    write addr length data.bin\twrite [data.bin] to flash from [addr] for [length] bytes" << std::endl;
@@ -432,7 +432,7 @@ void FlashProgrammer::start(int argc, char *argv[])
     int ret = OK;
 
     if (argc < 3) {
-        print_usage();
+        print_usage(argv[0]);
         emit finished(ERR_ARG);
         return;
     }
@@ -485,7 +485,7 @@ void FlashProgrammer::start(int argc, char *argv[])
     } else if (options == "info" && argc == 3) {
         ret = info(devname);
     } else {
-        print_usage();
+        print_usage(argv[0]);
         emit finished(ERR_ARG);
         return;
     }

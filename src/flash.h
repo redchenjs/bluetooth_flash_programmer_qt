@@ -45,7 +45,7 @@ private:
     int read(const QString &devname, uint32_t addr, uint32_t length, QString filename);
     int info(const QString &devname);
 
-    void print_usage(void);
+    void print_usage(char *appname);
 
 signals:
     void finished(int err = 0);
