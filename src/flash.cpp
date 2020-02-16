@@ -434,6 +434,7 @@ void FlashProgrammer::start(int argc, char *argv[])
     if (argc < 3) {
         print_usage();
         emit finished(ERR_ARG);
+        return;
     }
 
     QString devname = QString(argv[1]);
@@ -453,6 +454,7 @@ void FlashProgrammer::start(int argc, char *argv[])
         if (length <= 0) {
             std::cout << "invalid length" << std::endl;
             emit finished(ERR_ARG);
+            return;
         }
 
         ret = erase(devname, addr, length);
@@ -464,6 +466,7 @@ void FlashProgrammer::start(int argc, char *argv[])
         if (length <= 0) {
             std::cout << "invalid length" << std::endl;
             emit finished(ERR_ARG);
+            return;
         }
 
         ret = write(devname, addr, length, filename);
@@ -475,6 +478,7 @@ void FlashProgrammer::start(int argc, char *argv[])
         if (length <= 0) {
             std::cout << "invalid length" << std::endl;
             emit finished(ERR_ARG);
+            return;
         }
 
         ret = read(devname, addr, length, filename);
@@ -483,7 +487,9 @@ void FlashProgrammer::start(int argc, char *argv[])
     } else {
         print_usage();
         emit finished(ERR_ARG);
+        return;
     }
 
     emit finished(ret);
+    return;
 }
