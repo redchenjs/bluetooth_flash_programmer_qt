@@ -11,6 +11,12 @@
 #include <QtCore>
 #include <QtSerialPort/QSerialPort>
 
+#define OK           0
+#define ERR_ARG     -1
+#define ERR_FILE    -2
+#define ERR_DEVICE  -3
+#define ERR_REMOTE  -4
+
 class FlashProgrammer : public QObject
 {
     Q_OBJECT
@@ -18,6 +24,9 @@ class FlashProgrammer : public QObject
 public:
     void stop(void);
     void start(int argc, char *argv[]);
+
+private slots:
+    void error(QSerialPort::SerialPortError err);
 
 private:
     QSerialPort *m_device = nullptr;
@@ -48,7 +57,7 @@ private:
     void print_usage(char *appname);
 
 signals:
-    void finished(int err = 0);
+    void finished(int err = OK);
 };
 
 #endif // FLASH_H

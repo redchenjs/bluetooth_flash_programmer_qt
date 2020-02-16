@@ -14,12 +14,6 @@
 
 #include "flash.h"
 
-#define OK           0
-#define ERR_ARG     -1
-#define ERR_FILE    -2
-#define ERR_DEVICE  -3
-#define ERR_REMOTE  -4
-
 #define CMD_FMT_ERASE_ALL   "MTD+ERASE:ALL!"
 #define CMD_FMT_ERASE       "MTD+ERASE:0x%x+0x%x"
 #define CMD_FMT_WRITE       "MTD+WRITE:0x%x+0x%x"
@@ -61,6 +55,7 @@ int FlashProgrammer::open_device(const QString &devname)
         m_device->setParity(QSerialPort::NoParity);
         m_device->setStopBits(QSerialPort::OneStop);
         m_device->setFlowControl(QSerialPort::HardwareControl);
+        m_device->clearError();
         m_device->flush();
     } else {
         std::cout << "could not open device" << std::endl;
@@ -96,7 +91,7 @@ void FlashProgrammer::process_data(void)
                 }
             }
             if (data_size == strlen(rsp_fmt[i].fmt)) {
-                std::cout << "<< " << data_buff;
+                std::cout << "<= " << data_buff;
                 return;
             }
         }
@@ -112,7 +107,7 @@ void FlashProgrammer::process_data(void)
         }
     } else {
         m_device_rsp = RSP_IDX_TRUE;
-        std::cout << "<< " << data_buff;
+        std::cout << "<= " << data_buff;
     }
 }
 
@@ -143,7 +138,15 @@ int FlashProgrammer::send_data(const char *data, uint32_t length)
         return ERR_DEVICE;
     }
 
-    m_device->waitForBytesWritten();
+    while (m_device_rsp == RSP_IDX_NONE) {
+        if (m_device->waitForBytesWritten(10)) {
+            break;
+        }
+    }
+
+    if (m_device_rsp == RSP_IDX_FALSE) {
+        return ERR_DEVICE;
+    }
 
     return OK;
 }
@@ -159,7 +162,7 @@ int FlashProgrammer::erase_all(const QString &devname)
 
     // send command
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_ERASE_ALL"\r\n");
-    std::cout << ">> " << cmd_str;
+    std::cout << "=> " << cmd_str;
 
     clear_response();
 
@@ -187,7 +190,7 @@ int FlashProgrammer::erase(const QString &devname, uint32_t addr, uint32_t lengt
 
     // send command
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_ERASE"\r\n", addr, length);
-    std::cout << ">> " << cmd_str;
+    std::cout << "=> " << cmd_str;
 
     clear_response();
 
@@ -228,7 +231,7 @@ int FlashProgrammer::write(const QString &devname, uint32_t addr, uint32_t lengt
 
     // send command
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_WRITE"\r\n", addr, length);
-    std::cout << ">> " << cmd_str;
+    std::cout << "=> " << cmd_str;
 
     clear_response();
 
@@ -254,7 +257,7 @@ int FlashProgrammer::write(const QString &devname, uint32_t addr, uint32_t lengt
     uint32_t pkt = 0;
     for (pkt=0; pkt<length/990; pkt++) {
         if (fd.read(data_buff, 990) != 990) {
-            std::cout << std::endl << ">> ERROR" << std::endl;
+            std::cout << std::endl << "=> ERROR" << std::endl;
             fd.close();
             close_device();
             return ERR_FILE;
@@ -262,7 +265,6 @@ int FlashProgrammer::write(const QString &devname, uint32_t addr, uint32_t lengt
 
         ret = send_data(data_buff, 990);
         if (ret != OK) {
-            std::cout << std::endl << ">> ERROR" << std::endl;
             fd.close();
             close_device();
             return ret;
@@ -280,7 +282,7 @@ int FlashProgrammer::write(const QString &devname, uint32_t addr, uint32_t lengt
     uint32_t data_remain = length - pkt * 990;
     if (data_remain != 0 && data_remain < 990) {
         if (fd.read(data_buff, data_remain) != data_remain) {
-            std::cout << std::endl << ">> ERROR" << std::endl;
+            std::cout << std::endl << "=> ERROR" << std::endl;
             fd.close();
             close_device();
             return ERR_FILE;
@@ -288,7 +290,6 @@ int FlashProgrammer::write(const QString &devname, uint32_t addr, uint32_t lengt
 
         ret = send_data(data_buff, data_remain);
         if (ret != OK) {
-            std::cout << std::endl << ">> ERROR" << std::endl;
             fd.close();
             close_device();
             return ret;
@@ -332,7 +333,7 @@ int FlashProgrammer::read(const QString &devname, uint32_t addr, uint32_t length
 
     // send command
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_READ"\r\n", addr, length);
-    std::cout << ">> " << cmd_str;
+    std::cout << "=> " << cmd_str;
 
     data_fd = &fd; data_need = length; data_recv = 0;
 
@@ -367,7 +368,7 @@ int FlashProgrammer::read(const QString &devname, uint32_t addr, uint32_t length
         std::cout << "<< RECV:" << data_recv*100/data_need << "%\r";
     } while (data_recv != data_need);
 
-    std::cout << std::endl << "<< DONE" << std::endl;
+    std::cout << std::endl << "<= DONE" << std::endl;
     rw_in_progress = 0;
 
     data_fd = nullptr; data_need = 0; data_recv = 0;
@@ -389,7 +390,7 @@ int FlashProgrammer::info(const QString &devname)
 
     // send command
     snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_INFO"\r\n");
-    std::cout << ">> " << cmd_str;
+    std::cout << "=> " << cmd_str;
 
     clear_response();
 
@@ -418,6 +419,34 @@ void FlashProgrammer::print_usage(char *appname)
     std::cout << "    info\t\t\tread flash info" << std::endl;
 }
 
+void FlashProgrammer::error(QSerialPort::SerialPortError err)
+{
+    switch (err) {
+    case QSerialPort::NoError:
+    case QSerialPort::TimeoutError:
+        return;
+    case QSerialPort::WriteError:
+    case QSerialPort::ResourceError:
+        if (rw_in_progress) {
+            std::cout << std::endl << ">> ERROR";
+        } else {
+            std::cout << ">> ERROR" << std::endl;
+        }
+        break;
+    case QSerialPort::ReadError:
+        if (rw_in_progress) {
+            std::cout << std::endl << "<< ERROR";
+        } else {
+            std::cout << "<< ERROR" << std::endl;
+        }
+        break;
+    default:
+        break;
+    }
+
+    stop();
+}
+
 void FlashProgrammer::stop(void)
 {
     if (rw_in_progress) {
@@ -444,6 +473,7 @@ void FlashProgrammer::start(int argc, char *argv[])
 
     m_device = new QSerialPort(this);
     connect(m_device, &QSerialPort::readyRead, this, &FlashProgrammer::process_data);
+    connect(m_device, SIGNAL(error(QSerialPort::SerialPortError)), this, SLOT(error(QSerialPort::SerialPortError)));
 
     if (options == "erase_all" && argc == 3) {
         ret = erase_all(devname);

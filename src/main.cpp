@@ -15,13 +15,12 @@ static FlashProgrammer flash;
 void signalHandle(int signum)
 {
     switch (signum) {
-        case SIGINT:
-        case SIGTERM:
-        case SIGKILL:
-            flash.stop();
-            break;
-        default:
-            break;
+    case SIGINT:
+    case SIGTERM:
+        flash.stop();
+        break;
+    default:
+        break;
     }
 }
 
@@ -31,7 +30,6 @@ int main(int argc, char *argv[])
 
     signal(SIGINT, signalHandle);
     signal(SIGTERM, signalHandle);
-    signal(SIGKILL, signalHandle);
 
     QObject::connect(&flash, SIGNAL(finished()), &app, SLOT(quit()));
 
