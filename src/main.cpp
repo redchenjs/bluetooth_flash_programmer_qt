@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 
     QObject::connect(&flash, SIGNAL(finished()), &app, SLOT(quit()));
 
-    QTimer::singleShot(0, &flash, [=]()->void{flash.start(argc, argv);});
+    QTimer::singleShot(0, &flash, [&]()->void{flash.start(argc, argv);});
 
     return app.exec();
 }
