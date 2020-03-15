@@ -10,7 +10,7 @@
 #include <iostream>
 
 #include <QtCore>
-#include <QtSerialPort/QSerialPort>
+#include <QtBluetooth>
 
 #include "flash.h"
 
@@ -46,402 +46,148 @@ static const rsp_fmt_t rsp_fmt[] = {
     { false, "ERROR\r\n" },  // Error
 };
 
-int FlashProgrammer::open_device(const QString &devname)
+void FlashProgrammer::readyRead(void)
 {
-    m_device->setPortName(devname);
-    if (m_device->open(QIODevice::ReadWrite)) {
-        m_device->setBaudRate(921600);
-        m_device->setDataBits(QSerialPort::Data8);
-        m_device->setParity(QSerialPort::NoParity);
-        m_device->setStopBits(QSerialPort::OneStop);
-        m_device->setFlowControl(QSerialPort::HardwareControl);
-        m_device->clearError();
-        m_device->flush();
-    } else {
-        std::cout << "could not open device" << std::endl;
-        return ERR_DEVICE;
-    }
+    QByteArray recv = m_device->readAll();
 
-    return OK;
-}
-
-int FlashProgrammer::close_device(void)
-{
-    m_device->clearError();
-    m_device->close();
-
-    return OK;
-}
-
-void FlashProgrammer::process_data(void)
-{
-    QByteArray data = m_device->readAll();
-
-    char *data_buff = data.data();
-    uint32_t data_size = static_cast<uint32_t>(data.size());
+    char *recv_buff = recv.data();
+    uint32_t recv_size = static_cast<uint32_t>(recv.size());
 
     for (uint8_t i=0; i<sizeof(rsp_fmt)/sizeof(rsp_fmt_t); i++) {
-        if (strncmp(data_buff, rsp_fmt[i].fmt, strlen(rsp_fmt[i].fmt)) == 0) {
+        if (strncmp(recv_buff, rsp_fmt[i].fmt, strlen(rsp_fmt[i].fmt)) == 0) {
             if (rsp_fmt[i].flag == true) {
-                m_device_rsp = RSP_IDX_TRUE;
+                switch (m_cmd_idx) {
+                case CMD_IDX_ERASE_ALL:
+                case CMD_IDX_ERASE:
+                    emit finished(OK);
+                    break;
+                case CMD_IDX_WRITE:
+                    if (rw_in_progress == RW_NONE) {
+                        rw_in_progress = RW_WRITE;
+                        QTimer::singleShot(0, this, [&]()->void{this->sendData();});
+                    } else {
+                        std::cout << std::endl;
+                        rw_in_progress = RW_NONE;
+                        emit finished(OK);
+                    }
+                    break;
+                case CMD_IDX_READ:
+                    rw_in_progress = RW_READ;
+                    break;
+                default:
+                    break;
+                }
             } else {
-                m_device_rsp = RSP_IDX_FALSE;
-                if (rw_in_progress) {
+                if (rw_in_progress != RW_NONE) {
                     std::cout << std::endl;
                 }
+                emit finished(ERR_REMOTE);
             }
-            if (data_size == strlen(rsp_fmt[i].fmt)) {
-                std::cout << "<= " << data_buff;
+            if (recv_size == strlen(rsp_fmt[i].fmt)) {
+                std::cout << "<= " << recv_buff;
                 return;
             }
         }
     }
 
-    if (data_size > 0 && data_fd != nullptr && data_recv != data_need) {
-        if ((data_need - data_recv) < data_size) {
-            data_fd->write(data_buff, data_need - data_recv);
-            data_recv += data_need - data_recv;
+    if (rw_in_progress == RW_READ) {
+        if ((data_size - data_recv) <= recv_size) {
+            data_fd->write(recv_buff, data_size - data_recv);
+            data_fd->close();
+            data_recv += data_size - data_recv;
+            std::cout << "<< RECV:100%" << std::endl;
+            std::cout << "== DONE" << std::endl;
+            rw_in_progress = RW_NONE;
+            emit finished(OK);
         } else {
-            data_fd->write(data, data_size);
-            data_recv += data_size;
+            data_fd->write(recv_buff, recv_size);
+            data_recv += recv_size;
+            std::cout << "<< RECV:" << data_recv*100/data_size << "%\r";
         }
     } else {
-        m_device_rsp = RSP_IDX_TRUE;
-        std::cout << "<= " << data_buff;
+        std::cout << "<= " << recv_buff;
+        emit finished(OK);
     }
 }
 
-void FlashProgrammer::clear_response(void)
+void FlashProgrammer::bytesWritten(void)
 {
-    m_device_rsp = RSP_IDX_NONE;
+    uint32_t data_sent = data_size - static_cast<uint32_t>(m_device->bytesToWrite());
+
+    if (data_sent == data_size) {
+        std::cout << ">> SENT:100%\r";
+        disconnect(m_device, SIGNAL(bytesWritten(qint64)), this, SLOT(bytesWritten()));
+    } else {
+        std::cout << ">> SENT:" << data_sent*100/data_size << "%\r";
+    }
 }
 
-size_t FlashProgrammer::check_response(void)
+void FlashProgrammer::sendData(void)
 {
-    m_device->waitForReadyRead(10);
-
-    return m_device_rsp;
-}
-
-size_t FlashProgrammer::wait_for_response(void)
-{
-    while (m_device_rsp == RSP_IDX_NONE) {
-        m_device->waitForReadyRead(10);
-    }
-
-    return m_device_rsp;
-}
-
-int FlashProgrammer::send_data(const char *data, uint32_t length)
-{
-    if (m_device->write(data, length) < 1) {
-        return ERR_DEVICE;
-    }
-
-    while (m_device_rsp == RSP_IDX_NONE) {
-        if (m_device->waitForBytesWritten(10)) {
-            break;
-        }
-    }
-
-    if (m_device_rsp == RSP_IDX_FALSE) {
-        return ERR_DEVICE;
-    }
-
-    return OK;
-}
-
-int FlashProgrammer::erase_all(const QString &devname)
-{
-    int ret = OK;
-    char cmd_str[32] = {0};
-
-    if (open_device(devname)) {
-        return ERR_DEVICE;
-    }
-
-    // send command
-    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_ERASE_ALL"\r\n");
-    std::cout << "=> " << cmd_str;
-
-    clear_response();
-
-    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
-    if (ret != OK) {
-        close_device();
-        return ret;
-    }
-
-    wait_for_response();
-
-    close_device();
-
-    return ret;
-}
-
-int FlashProgrammer::erase(const QString &devname, uint32_t addr, uint32_t length)
-{
-    int ret = OK;
-    char cmd_str[32] = {0};
-
-    if (open_device(devname)) {
-        return ERR_DEVICE;
-    }
-
-    // send command
-    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_ERASE"\r\n", addr, length);
-    std::cout << "=> " << cmd_str;
-
-    clear_response();
-
-    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
-    if (ret != OK) {
-        close_device();
-        return ret;
-    }
-
-    wait_for_response();
-
-    close_device();
-
-    return ret;
-}
-
-int FlashProgrammer::write(const QString &devname, uint32_t addr, uint32_t length, QString filename)
-{
-    int ret = OK;
-    char cmd_str[32] = {0};
-    char data_buff[990] = {0};
-
-    if (length <= 0) {
-        std::cout << "invalid length" << std::endl;
-        return ERR_ARG;
-    }
-
-    QFile fd(filename);
-    if (!fd.open(QIODevice::ReadOnly)) {
-        std::cout << "could not open file" << std::endl;
-        return ERR_FILE;
-    }
-
-    if (open_device(devname)) {
-        fd.close();
-        return ERR_DEVICE;
-    }
-
-    // send command
-    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_WRITE"\r\n", addr, length);
-    std::cout << "=> " << cmd_str;
-
-    clear_response();
-
-    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
-    if (ret != OK) {
-        fd.close();
-        close_device();
-        return ret;
-    }
-
-    if (wait_for_response() == RSP_IDX_FALSE) {
-        fd.close();
-        close_device();
-        return ERR_REMOTE;
-    }
-
-    // send data
-    rw_in_progress = 1;
-    std::cout << ">> SENT:" << "0%\r";
-
-    clear_response();
+    char read_buff[4096] = {0};
 
     uint32_t pkt = 0;
-    for (pkt=0; pkt<length/990; pkt++) {
-        if (fd.read(data_buff, 990) != 990) {
-            std::cout << std::endl << "=> ERROR" << std::endl;
-            fd.close();
-            close_device();
-            return ERR_FILE;
+    for (pkt=0; pkt<data_size/sizeof(read_buff); pkt++) {
+        if (data_fd->read(read_buff, sizeof(read_buff)) != sizeof(read_buff)) {
+            std::cout << std::endl << "== ERROR" << std::endl;
+            data_fd->close();
+            emit finished(ERR_FILE);
+            return;
         }
 
-        ret = send_data(data_buff, 990);
-        if (ret != OK) {
-            fd.close();
-            close_device();
-            return ret;
-        }
+        m_device->write(read_buff, sizeof(read_buff));
 
-        if (m_device_rsp == RSP_IDX_FALSE) {
-            fd.close();
-            close_device();
-            return ERR_REMOTE;
-        }
-
-        std::cout << ">> SENT:" << pkt*990*100/length << "%\r";
+        std::cout << "== READ:" << pkt*sizeof(read_buff)*100/data_size << "%\r";
     }
 
-    uint32_t data_remain = length - pkt * 990;
-    if (data_remain != 0 && data_remain < 990) {
-        if (fd.read(data_buff, data_remain) != data_remain) {
-            std::cout << std::endl << "=> ERROR" << std::endl;
-            fd.close();
-            close_device();
-            return ERR_FILE;
+    uint32_t data_remain = data_size - pkt * sizeof(read_buff);
+    if (data_remain != 0 && data_remain < sizeof(read_buff)) {
+        if (data_fd->read(read_buff, data_remain) != data_remain) {
+            std::cout << std::endl << "== ERROR" << std::endl;
+            data_fd->close();
+            emit finished(ERR_FILE);
+            return;
         }
 
-        ret = send_data(data_buff, data_remain);
-        if (ret != OK) {
-            fd.close();
-            close_device();
-            return ret;
-        }
+        m_device->write(read_buff, data_remain);
 
-        if (m_device_rsp == RSP_IDX_FALSE) {
-            fd.close();
-            close_device();
-            return ERR_REMOTE;
-        }
-
-        std::cout << ">> SENT:" << (data_remain+pkt*990)*100/length << "%\r";
+        std::cout << "== READ:" << (pkt*sizeof(read_buff)+data_remain)*100/data_size << "%\r";
     }
 
-    std::cout << std::endl;
-    rw_in_progress = 0;
+    std::cout << "== READ:100%" << std::endl;
 
-    wait_for_response();
+    connect(m_device, SIGNAL(bytesWritten(qint64)), this, SLOT(bytesWritten()));
 
-    fd.close();
-    close_device();
-
-    return ret;
+    data_fd->close();
 }
 
-int FlashProgrammer::read(const QString &devname, uint32_t addr, uint32_t length, QString filename)
-{
-    int ret = OK;
-    char cmd_str[32] = {0};
-
-    QFile fd(filename);
-    if (!fd.open(QIODevice::WriteOnly)) {
-        std::cout << "could not open file" << std::endl;
-        return ERR_FILE;
-    }
-
-    if (open_device(devname)) {
-        fd.close();
-        return ERR_DEVICE;
-    }
-
-    // send command
-    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_READ"\r\n", addr, length);
-    std::cout << "=> " << cmd_str;
-
-    data_fd = &fd; data_need = length; data_recv = 0;
-
-    clear_response();
-
-    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
-    if (ret != OK) {
-        fd.close();
-        close_device();
-        return ret;
-    }
-
-    if (wait_for_response() == RSP_IDX_FALSE) {
-        fd.close();
-        close_device();
-        return ERR_REMOTE;
-    }
-
-    // receive data
-    rw_in_progress = 1;
-    std::cout << "<< RECV:" << data_recv*100/data_need << "%\r";
-
-    clear_response();
-
-    do {
-        if (check_response() == RSP_IDX_FALSE) {
-            fd.close();
-            close_device();
-            return ERR_REMOTE;
-        }
-
-        std::cout << "<< RECV:" << data_recv*100/data_need << "%\r";
-    } while (data_recv != data_need);
-
-    std::cout << std::endl << "<= DONE" << std::endl;
-    rw_in_progress = 0;
-
-    data_fd = nullptr; data_need = 0; data_recv = 0;
-
-    fd.close();
-    close_device();
-
-    return ret;
-}
-
-int FlashProgrammer::info(const QString &devname)
-{
-    int ret = OK;
-    char cmd_str[32] = {0};
-
-    if (open_device(devname)) {
-        return ERR_DEVICE;
-    }
-
-    // send command
-    snprintf(cmd_str, sizeof(cmd_str), CMD_FMT_INFO"\r\n");
-    std::cout << "=> " << cmd_str;
-
-    clear_response();
-
-    ret = send_data(cmd_str, static_cast<uint32_t>(strlen(cmd_str)));
-    if (ret != OK) {
-        close_device();
-        return ret;
-    }
-
-    wait_for_response();
-
-    close_device();
-
-    return ret;
-}
-
-void FlashProgrammer::print_usage(char *appname)
+void FlashProgrammer::printUsage(void)
 {
     std::cout << "Usage:" << std::endl;
-    std::cout << "    " << appname << " /dev/rfcommX COMMAND\n" << std::endl;
+    std::cout << "    " << m_arg[0] << " BD_ADDR COMMAND\n" << std::endl;
     std::cout << "Commands:" << std::endl;
     std::cout << "    erase_all\t\t\terase full flash chip" << std::endl;
     std::cout << "    erase addr length\t\terase flash start from [addr] for [length] bytes" << std::endl;
     std::cout << "    write addr length data.bin\twrite [data.bin] to flash from [addr] for [length] bytes" << std::endl;
     std::cout << "    read  addr length data.bin\tread flash from [addr] for [length] bytes to [data.bin]" << std::endl;
     std::cout << "    info\t\t\tread flash info" << std::endl;
+
+    emit finished();
 }
 
-void FlashProgrammer::error(QSerialPort::SerialPortError err)
+void FlashProgrammer::connected(void)
 {
-    switch (err) {
-    case QSerialPort::NoError:
-    case QSerialPort::TimeoutError:
-        return;
-    case QSerialPort::WriteError:
-    case QSerialPort::ResourceError:
-        if (rw_in_progress) {
-            std::cout << std::endl << ">> ERROR";
-        } else {
-            std::cout << ">> ERROR" << std::endl;
-        }
-        break;
-    case QSerialPort::ReadError:
-        if (rw_in_progress) {
-            std::cout << std::endl << "<< ERROR";
-        } else {
-            std::cout << "<< ERROR" << std::endl;
-        }
-        break;
-    default:
-        break;
+    std::cout << "=> " << m_cmd_str;
+
+    m_device->write(m_cmd_str, static_cast<uint32_t>(strlen(m_cmd_str)));
+}
+
+void FlashProgrammer::disconnected(void)
+{
+    if (rw_in_progress != RW_NONE) {
+        std::cout << std::endl << "== ERROR";
+    } else {
+        std::cout << "== ERROR" << std::endl;
     }
 
     stop();
@@ -449,36 +195,34 @@ void FlashProgrammer::error(QSerialPort::SerialPortError err)
 
 void FlashProgrammer::stop(void)
 {
-    if (rw_in_progress) {
+    if (rw_in_progress != RW_NONE) {
         std::cout << std::endl;
     }
 
-    m_device_rsp = RSP_IDX_FALSE;
+    emit finished(ERR_ABORT);
 }
 
 void FlashProgrammer::start(int argc, char *argv[])
 {
-    int ret = OK;
-
-    if (argc < 3) {
-        print_usage(argv[0]);
-        emit finished(ERR_ARG);
-        return;
-    }
-
-    QString devname = QString(argv[1]);
-    QString options = QString(argv[2]);
-
+    m_arg = argv;
     std::cout << std::unitbuf;
 
-    m_device = new QSerialPort(this);
-    connect(m_device, &QSerialPort::readyRead, this, &FlashProgrammer::process_data);
-    connect(m_device, SIGNAL(error(QSerialPort::SerialPortError)), this, SLOT(error(QSerialPort::SerialPortError)));
+    QBluetoothAddress bdaddr = QBluetoothAddress(m_arg[1]);
+    QString command = QString(m_arg[2]);
 
-    if (options == "erase_all" && argc == 3) {
-        ret = erase_all(devname);
-    } else if (options == "erase" && argc == 5) {
-        uint32_t addr = static_cast<uint32_t>(std::stoul(argv[3], nullptr, 16));
+    m_device = new QBluetoothSocket(QBluetoothServiceInfo::RfcommProtocol, this);
+    connect(m_device, SIGNAL(readyRead()), this, SLOT(readyRead()));
+    connect(m_device, SIGNAL(connected()), this, SLOT(connected()));
+    connect(m_device, SIGNAL(disconnected()), this, SLOT(disconnected()));
+    connect(m_device, SIGNAL(error(QBluetoothSocket::SocketError)), this, SLOT(disconnected()));
+
+    if (command == "erase_all" && argc == 3) {
+        m_cmd_idx = CMD_IDX_ERASE_ALL;
+        snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_ERASE_ALL"\r\n");
+
+        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+    } else if (command == "erase" && argc == 5) {
+        uint32_t addr = static_cast<uint32_t>(std::stoul(m_arg[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
 
         if (length <= 0) {
@@ -487,39 +231,60 @@ void FlashProgrammer::start(int argc, char *argv[])
             return;
         }
 
-        ret = erase(devname, addr, length);
-    } else if (options == "write" && argc == 6) {
-        uint32_t addr = static_cast<uint32_t>(std::stoul(argv[3], nullptr, 16));
+        m_cmd_idx = CMD_IDX_ERASE;
+        snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_ERASE"\r\n", addr, length);
+
+        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+    } else if (command == "write" && argc == 6) {
+        uint32_t addr = static_cast<uint32_t>(std::stoul(m_arg[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
-        QString filename = QString(argv[5]);
 
         if (length <= 0) {
-            std::cout << "invalid length" << std::endl;
+            std::cout << "Invalid length" << std::endl;
             emit finished(ERR_ARG);
             return;
         }
 
-        ret = write(devname, addr, length, filename);
-    } else if (options == "read" && argc == 6) {
-        uint32_t addr = static_cast<uint32_t>(std::stoul(argv[3], nullptr, 16));
+        data_fd = new QFile(m_arg[5]);
+        if (!data_fd->open(QIODevice::ReadOnly)) {
+            std::cout << "Could not open file" << std::endl;
+            emit finished(ERR_FILE);
+            return;
+        }
+        data_size = length;
+
+        m_cmd_idx = CMD_IDX_WRITE;
+        snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_WRITE"\r\n", addr, length);
+
+        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+    } else if (command == "read" && argc == 6) {
+        uint32_t addr = static_cast<uint32_t>(std::stoul(m_arg[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
-        QString filename = QString(argv[5]);
 
         if (length <= 0) {
-            std::cout << "invalid length" << std::endl;
+            std::cout << "Invalid length" << std::endl;
             emit finished(ERR_ARG);
             return;
         }
 
-        ret = read(devname, addr, length, filename);
-    } else if (options == "info" && argc == 3) {
-        ret = info(devname);
+        data_fd = new QFile(m_arg[5]);
+        if (!data_fd->open(QIODevice::WriteOnly)) {
+            std::cout << "Could not open file" << std::endl;
+            emit finished(ERR_FILE);
+            return;
+        }
+        data_size = length; data_recv = 0;
+
+        m_cmd_idx = CMD_IDX_READ;
+        snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_READ"\r\n", addr, length);
+
+        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+    } else if (command == "info" && argc == 3) {
+        m_cmd_idx = CMD_IDX_INFO;
+        snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_INFO"\r\n");
+
+        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
     } else {
-        print_usage(argv[0]);
-        emit finished(ERR_ARG);
-        return;
+        printUsage();
     }
-
-    emit finished(ret);
-    return;
 }
