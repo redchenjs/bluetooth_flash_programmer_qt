@@ -11,7 +11,7 @@ QT += core bluetooth
 
 CONFIG += c++17
 
-TARGET = bluetooth-flash-programmer
+TARGET = btflash
 TEMPLATE = app
 
 SOURCES += src/main.cpp src/flash.cpp
