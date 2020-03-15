@@ -220,7 +220,7 @@ void FlashProgrammer::start(int argc, char *argv[])
         m_cmd_idx = CMD_IDX_ERASE_ALL;
         snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_ERASE_ALL"\r\n");
 
-        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+        m_device->connectToService(bdaddr, QBluetoothUuid::SerialPort);
     } else if (command == "erase" && argc == 5) {
         uint32_t addr = static_cast<uint32_t>(std::stoul(m_arg[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
@@ -234,7 +234,7 @@ void FlashProgrammer::start(int argc, char *argv[])
         m_cmd_idx = CMD_IDX_ERASE;
         snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_ERASE"\r\n", addr, length);
 
-        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+        m_device->connectToService(bdaddr, QBluetoothUuid::SerialPort);
     } else if (command == "write" && argc == 6) {
         uint32_t addr = static_cast<uint32_t>(std::stoul(m_arg[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
@@ -256,7 +256,7 @@ void FlashProgrammer::start(int argc, char *argv[])
         m_cmd_idx = CMD_IDX_WRITE;
         snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_WRITE"\r\n", addr, length);
 
-        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+        m_device->connectToService(bdaddr, QBluetoothUuid::SerialPort);
     } else if (command == "read" && argc == 6) {
         uint32_t addr = static_cast<uint32_t>(std::stoul(m_arg[3], nullptr, 16));
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
@@ -278,12 +278,12 @@ void FlashProgrammer::start(int argc, char *argv[])
         m_cmd_idx = CMD_IDX_READ;
         snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_READ"\r\n", addr, length);
 
-        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+        m_device->connectToService(bdaddr, QBluetoothUuid::SerialPort);
     } else if (command == "info" && argc == 3) {
         m_cmd_idx = CMD_IDX_INFO;
         snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_INFO"\r\n");
 
-        m_device->connectToService(QBluetoothAddress(m_arg[1]), QBluetoothUuid::SerialPort);
+        m_device->connectToService(bdaddr, QBluetoothUuid::SerialPort);
     } else {
         printUsage();
     }
