@@ -46,15 +46,73 @@ static const rsp_fmt_t rsp_fmt[] = {
     { false, "ERROR\r\n" },  // Error
 };
 
-void FlashProgrammer::readyRead(void)
+void FlashProgrammer::sendData(void)
+{
+    char read_buff[990] = {0};
+    uint32_t data_remain = data_size - data_done;
+
+    if (m_device->bytesToWrite() != 0) {
+        return;
+    }
+
+    if (data_remain == 0) {
+        std::cout << ">> SENT:100%\r";
+
+        data_fd->close();
+
+        disconnect(m_device, SIGNAL(bytesWritten(qint64)), this, SLOT(sendData()));
+    } else {
+        std::cout << ">> SENT:" << data_done*100/data_size << "%\r";
+
+        if (data_remain >= sizeof(read_buff)) {
+            if (data_fd->read(read_buff, sizeof(read_buff)) != sizeof(read_buff)) {
+                std::cout << std::endl << "== ERROR" << std::endl;
+
+                data_fd->close();
+
+                emit finished(ERR_FILE);
+                return;
+            }
+
+            m_device->write(read_buff, sizeof(read_buff));
+
+            data_done += sizeof(read_buff);
+        } else {
+            if (data_fd->read(read_buff, data_remain) != data_remain) {
+                std::cout << std::endl << "== ERROR" << std::endl;
+
+                data_fd->close();
+
+                emit finished(ERR_FILE);
+                return;
+            }
+
+            m_device->write(read_buff, data_remain);
+
+            data_done += data_remain;
+        }
+    }
+}
+
+void FlashProgrammer::sendCommand(void)
+{
+    std::cout << "=> " << m_cmd_str;
+
+    m_device->write(m_cmd_str, static_cast<uint32_t>(strlen(m_cmd_str)));
+}
+
+void FlashProgrammer::processData(void)
 {
     QByteArray recv = m_device->readAll();
-
     char *recv_buff = recv.data();
-    uint32_t recv_size = static_cast<uint32_t>(recv.size());
 
     for (uint8_t i=0; i<sizeof(rsp_fmt)/sizeof(rsp_fmt_t); i++) {
         if (strncmp(recv_buff, rsp_fmt[i].fmt, strlen(rsp_fmt[i].fmt)) == 0) {
+            if (rw_in_progress != RW_NONE) {
+                std::cout << std::endl;
+            }
+            std::cout << "<= " << recv_buff;
+
             if (rsp_fmt[i].flag == true) {
                 switch (m_cmd_idx) {
                 case CMD_IDX_ERASE_ALL:
@@ -64,10 +122,13 @@ void FlashProgrammer::readyRead(void)
                 case CMD_IDX_WRITE:
                     if (rw_in_progress == RW_NONE) {
                         rw_in_progress = RW_WRITE;
-                        QTimer::singleShot(0, this, [&]()->void{this->sendData();});
+
+                        connect(m_device, SIGNAL(bytesWritten(qint64)), this, SLOT(sendData()));
+
+                        sendData();
                     } else {
-                        std::cout << std::endl;
                         rw_in_progress = RW_NONE;
+
                         emit finished(OK);
                     }
                     break;
@@ -78,31 +139,35 @@ void FlashProgrammer::readyRead(void)
                     break;
                 }
             } else {
-                if (rw_in_progress != RW_NONE) {
-                    std::cout << std::endl;
-                }
                 emit finished(ERR_REMOTE);
             }
-            if (recv_size == strlen(rsp_fmt[i].fmt)) {
-                std::cout << "<= " << recv_buff;
-                return;
-            }
+
+            return;
         }
     }
 
     if (rw_in_progress == RW_READ) {
-        if ((data_size - data_recv) <= recv_size) {
-            data_fd->write(recv_buff, data_size - data_recv);
+        uint32_t recv_size = static_cast<uint32_t>(recv.size());
+        uint32_t data_remain = data_size - data_done;
+
+        if (data_remain <= recv_size) {
+            data_fd->write(recv_buff, data_remain);
             data_fd->close();
-            data_recv += data_size - data_recv;
+
+            data_done += data_remain;
+
             std::cout << "<< RECV:100%" << std::endl;
             std::cout << "== DONE" << std::endl;
+
             rw_in_progress = RW_NONE;
+
             emit finished(OK);
         } else {
             data_fd->write(recv_buff, recv_size);
-            data_recv += recv_size;
-            std::cout << "<< RECV:" << data_recv*100/data_size << "%\r";
+
+            data_done += recv_size;
+
+            std::cout << "<< RECV:" << data_done*100/data_size << "%\r";
         }
     } else {
         std::cout << "<= " << recv_buff;
@@ -110,55 +175,15 @@ void FlashProgrammer::readyRead(void)
     }
 }
 
-void FlashProgrammer::bytesWritten(void)
+void FlashProgrammer::processError(void)
 {
-    uint32_t data_sent = data_size - static_cast<uint32_t>(m_device->bytesToWrite());
-
-    if (data_sent == data_size) {
-        std::cout << ">> SENT:100%\r";
-        disconnect(m_device, SIGNAL(bytesWritten(qint64)), this, SLOT(bytesWritten()));
+    if (rw_in_progress != RW_NONE) {
+        std::cout << std::endl << "== ERROR";
     } else {
-        std::cout << ">> SENT:" << data_sent*100/data_size << "%\r";
-    }
-}
-
-void FlashProgrammer::sendData(void)
-{
-    char read_buff[4096] = {0};
-
-    uint32_t pkt = 0;
-    for (pkt=0; pkt<data_size/sizeof(read_buff); pkt++) {
-        if (data_fd->read(read_buff, sizeof(read_buff)) != sizeof(read_buff)) {
-            std::cout << std::endl << "== ERROR" << std::endl;
-            data_fd->close();
-            emit finished(ERR_FILE);
-            return;
-        }
-
-        m_device->write(read_buff, sizeof(read_buff));
-
-        std::cout << "== READ:" << pkt*sizeof(read_buff)*100/data_size << "%\r";
+        std::cout << "== ERROR" << std::endl;
     }
 
-    uint32_t data_remain = data_size - pkt * sizeof(read_buff);
-    if (data_remain != 0 && data_remain < sizeof(read_buff)) {
-        if (data_fd->read(read_buff, data_remain) != data_remain) {
-            std::cout << std::endl << "== ERROR" << std::endl;
-            data_fd->close();
-            emit finished(ERR_FILE);
-            return;
-        }
-
-        m_device->write(read_buff, data_remain);
-
-        std::cout << "== READ:" << (pkt*sizeof(read_buff)+data_remain)*100/data_size << "%\r";
-    }
-
-    std::cout << "== READ:100%" << std::endl;
-
-    connect(m_device, SIGNAL(bytesWritten(qint64)), this, SLOT(bytesWritten()));
-
-    data_fd->close();
+    stop();
 }
 
 void FlashProgrammer::printUsage(void)
@@ -172,25 +197,7 @@ void FlashProgrammer::printUsage(void)
     std::cout << "    read  addr length data.bin\tread flash from [addr] for [length] bytes to [data.bin]" << std::endl;
     std::cout << "    info\t\t\tread flash info" << std::endl;
 
-    emit finished();
-}
-
-void FlashProgrammer::connected(void)
-{
-    std::cout << "=> " << m_cmd_str;
-
-    m_device->write(m_cmd_str, static_cast<uint32_t>(strlen(m_cmd_str)));
-}
-
-void FlashProgrammer::disconnected(void)
-{
-    if (rw_in_progress != RW_NONE) {
-        std::cout << std::endl << "== ERROR";
-    } else {
-        std::cout << "== ERROR" << std::endl;
-    }
-
-    stop();
+    emit finished(ERR_ARG);
 }
 
 void FlashProgrammer::stop(void)
@@ -211,10 +218,10 @@ void FlashProgrammer::start(int argc, char *argv[])
     QString command = QString(m_arg[2]);
 
     m_device = new QBluetoothSocket(QBluetoothServiceInfo::RfcommProtocol, this);
-    connect(m_device, SIGNAL(readyRead()), this, SLOT(readyRead()));
-    connect(m_device, SIGNAL(connected()), this, SLOT(connected()));
-    connect(m_device, SIGNAL(disconnected()), this, SLOT(disconnected()));
-    connect(m_device, SIGNAL(error(QBluetoothSocket::SocketError)), this, SLOT(disconnected()));
+    connect(m_device, SIGNAL(connected()), this, SLOT(sendCommand()));
+    connect(m_device, SIGNAL(readyRead()), this, SLOT(processData()));
+    connect(m_device, SIGNAL(disconnected()), this, SLOT(processError()));
+    connect(m_device, SIGNAL(error(QBluetoothSocket::SocketError)), this, SLOT(processError()));
 
     if (command == "erase_all" && argc == 3) {
         m_cmd_idx = CMD_IDX_ERASE_ALL;
@@ -251,7 +258,9 @@ void FlashProgrammer::start(int argc, char *argv[])
             emit finished(ERR_FILE);
             return;
         }
+
         data_size = length;
+        data_done = 0;
 
         m_cmd_idx = CMD_IDX_WRITE;
         snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_WRITE"\r\n", addr, length);
@@ -273,7 +282,9 @@ void FlashProgrammer::start(int argc, char *argv[])
             emit finished(ERR_FILE);
             return;
         }
-        data_size = length; data_recv = 0;
+
+        data_size = length;
+        data_done = 0;
 
         m_cmd_idx = CMD_IDX_READ;
         snprintf(m_cmd_str, sizeof(m_cmd_str), CMD_FMT_READ"\r\n", addr, length);

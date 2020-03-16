@@ -31,11 +31,11 @@ public:
     void start(int argc, char *argv[]);
 
 private slots:
-    void connected(void);
-    void disconnected(void);
+    void sendData(void);
+    void sendCommand(void);
 
-    void readyRead(void);
-    void bytesWritten(void);
+    void processData(void);
+    void processError(void);
 
 private:
     char **m_arg = nullptr;
@@ -47,11 +47,9 @@ private:
 
     QFile *data_fd = nullptr;
     uint32_t data_size = 0;
-    uint32_t data_recv = 0;
+    uint32_t data_done = 0;
 
     size_t rw_in_progress = RW_NONE;
-
-    void sendData(void);
 
     void printUsage(void);
 
