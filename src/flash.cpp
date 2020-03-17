@@ -189,7 +189,7 @@ void FlashProgrammer::processError(void)
 void FlashProgrammer::printUsage(void)
 {
     std::cout << "Usage:" << std::endl;
-    std::cout << "    " << m_arg[0] << " BD_ADDR COMMAND\n" << std::endl;
+    std::cout << "    " << m_arg[0] << " BD_ADDR COMMAND" << std::endl << std::endl;
     std::cout << "Commands:" << std::endl;
     std::cout << "    erase_all\t\t\terase full flash chip" << std::endl;
     std::cout << "    erase addr length\t\terase flash start from [addr] for [length] bytes" << std::endl;
@@ -233,7 +233,7 @@ void FlashProgrammer::start(int argc, char *argv[])
         uint32_t length = static_cast<uint32_t>(std::stoul(argv[4], nullptr, 16));
 
         if (length <= 0) {
-            std::cout << "invalid length" << std::endl;
+            std::cout << "Invalid length" << std::endl;
             emit finished(ERR_ARG);
             return;
         }
