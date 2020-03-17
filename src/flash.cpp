@@ -70,7 +70,7 @@ void FlashProgrammer::sendData(void)
 
                 data_fd->close();
 
-                emit finished(ERR_FILE);
+                stop(ERR_FILE);
                 return;
             }
 
@@ -83,7 +83,7 @@ void FlashProgrammer::sendData(void)
 
                 data_fd->close();
 
-                emit finished(ERR_FILE);
+                stop(ERR_FILE);
                 return;
             }
 
@@ -117,7 +117,7 @@ void FlashProgrammer::processData(void)
                 switch (m_cmd_idx) {
                 case CMD_IDX_ERASE_ALL:
                 case CMD_IDX_ERASE:
-                    emit finished(OK);
+                    stop();
                     break;
                 case CMD_IDX_WRITE:
                     if (rw_in_progress == RW_NONE) {
@@ -129,7 +129,7 @@ void FlashProgrammer::processData(void)
                     } else {
                         rw_in_progress = RW_NONE;
 
-                        emit finished(OK);
+                        stop();
                     }
                     break;
                 case CMD_IDX_READ:
@@ -139,7 +139,7 @@ void FlashProgrammer::processData(void)
                     break;
                 }
             } else {
-                emit finished(ERR_REMOTE);
+                stop(ERR_REMOTE);
             }
 
             return;
@@ -161,7 +161,7 @@ void FlashProgrammer::processData(void)
 
             rw_in_progress = RW_NONE;
 
-            emit finished(OK);
+            stop();
         } else {
             data_fd->write(recv_buff, recv_size);
 
@@ -171,7 +171,7 @@ void FlashProgrammer::processData(void)
         }
     } else {
         std::cout << "<= " << recv_buff;
-        emit finished(OK);
+        stop();
     }
 }
 
@@ -183,7 +183,7 @@ void FlashProgrammer::processError(void)
         std::cout << "== ERROR" << std::endl;
     }
 
-    stop();
+    stop(ERR_ABORT);
 }
 
 void FlashProgrammer::printUsage(void)
@@ -197,16 +197,20 @@ void FlashProgrammer::printUsage(void)
     std::cout << "    read  addr length data.bin\tread flash from [addr] for [length] bytes to [data.bin]" << std::endl;
     std::cout << "    info\t\t\tread flash info" << std::endl;
 
-    emit finished(ERR_ARG);
+    stop(ERR_ARG);
 }
 
-void FlashProgrammer::stop(void)
+void FlashProgrammer::stop(int err)
 {
     if (rw_in_progress != RW_NONE) {
         std::cout << std::endl;
     }
 
-    emit finished(ERR_ABORT);
+    if (err != OK) {
+        m_device->abort();
+    }
+
+    emit finished(err);
 }
 
 void FlashProgrammer::start(int argc, char *argv[])
@@ -234,7 +238,7 @@ void FlashProgrammer::start(int argc, char *argv[])
 
         if (length <= 0) {
             std::cout << "Invalid length" << std::endl;
-            emit finished(ERR_ARG);
+            stop(ERR_ARG);
             return;
         }
 
@@ -248,14 +252,14 @@ void FlashProgrammer::start(int argc, char *argv[])
 
         if (length <= 0) {
             std::cout << "Invalid length" << std::endl;
-            emit finished(ERR_ARG);
+            stop(ERR_ARG);
             return;
         }
 
         data_fd = new QFile(m_arg[5]);
         if (!data_fd->open(QIODevice::ReadOnly)) {
             std::cout << "Could not open file" << std::endl;
-            emit finished(ERR_FILE);
+            stop(ERR_FILE);
             return;
         }
 
@@ -272,14 +276,14 @@ void FlashProgrammer::start(int argc, char *argv[])
 
         if (length <= 0) {
             std::cout << "Invalid length" << std::endl;
-            emit finished(ERR_ARG);
+            stop(ERR_ARG);
             return;
         }
 
         data_fd = new QFile(m_arg[5]);
         if (!data_fd->open(QIODevice::WriteOnly)) {
             std::cout << "Could not open file" << std::endl;
-            emit finished(ERR_FILE);
+            stop(ERR_FILE);
             return;
         }
 
