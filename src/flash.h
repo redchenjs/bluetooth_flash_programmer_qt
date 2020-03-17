@@ -27,7 +27,7 @@ class FlashProgrammer: public QObject
     Q_OBJECT
 
 public:
-    void stop(int err = OK);
+    void stop(void);
     void start(int argc, char *argv[]);
 
 private slots:
