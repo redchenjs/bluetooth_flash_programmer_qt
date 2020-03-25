@@ -134,6 +134,7 @@ void FlashProgrammer::processData(void)
                     break;
                 case CMD_IDX_READ:
                     rw_in_progress = RW_READ;
+                    std::cout << "<< RECV:0%\r";
                     break;
                 default:
                     break;
