@@ -9,7 +9,7 @@
 
 QT += core bluetooth
 
-CONFIG += c++17
+CONFIG += console
 
 TARGET = btflash
 TEMPLATE = app

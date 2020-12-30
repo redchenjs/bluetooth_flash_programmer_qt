@@ -1,15 +1,14 @@
 Bluetooth Flash Programmer
 ==========================
 
-User tools for Bluetooth Flash Programmer.
+Bluetooth Flash Programmer using Bluetooth SPP profile.
 
 ## Dependencies
 
 ```
 cmake
-pkg-config
-qt5-default
-qt5connectivity-dev
+qt5-base
+qt5-connectivity
 ```
 
 ## Build
@@ -47,7 +46,7 @@ btflash BD_ADDR write 0x0000(addr) 0x1000(length) data.bin
 btflash BD_ADDR read 0x0000(addr) 0x1000(length) data.bin
 ```
 
-### Read flash info
+### Get flash info
 
 ```
 btflash BD_ADDR info

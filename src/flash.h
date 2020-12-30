@@ -11,47 +11,58 @@
 #include <QtCore>
 #include <QtBluetooth>
 
+#define NONE         1
 #define OK           0
 #define ERR_ARG     -1
 #define ERR_FILE    -2
 #define ERR_ABORT   -3
-#define ERR_DEVICE  -4
-#define ERR_REMOTE  -5
+#define ERR_SOCKET  -4
+#define ERR_DISCOVR -5
 
-#define RW_NONE     0
-#define RW_READ     1
-#define RW_WRITE    2
+#define RW_NONE  0
+#define RW_READ  1
+#define RW_WRITE 2
 
-class FlashProgrammer: public QObject
+class FlashProgrammer : public QObject
 {
     Q_OBJECT
 
 public:
-    void stop(void);
+    void stop(int err = OK);
     void start(int argc, char *argv[]);
-
-private slots:
-    void sendData(void);
-    void sendCommand(void);
-
-    void processData(void);
-    void processError(void);
 
 private:
     char **m_arg = nullptr;
 
-    QBluetoothSocket *m_device = nullptr;
+    QBluetoothAddress m_address;
+    QBluetoothDeviceDiscoveryAgent *m_discovery = nullptr;
+    QBluetoothSocket *m_socket = nullptr;
 
-    size_t m_cmd_idx = 0;
+    int m_cmd_idx = 0;
     char m_cmd_str[32] = {0};
 
     QFile *data_fd = nullptr;
     uint32_t data_size = 0;
     uint32_t data_done = 0;
 
-    size_t rw_in_progress = RW_NONE;
+    int err_code = NONE;
+    int rw_state = RW_NONE;
 
     void printUsage(void);
+
+private slots:
+    void sendData(void);
+    void sendCommand(void);
+
+    void processData(void);
+
+    void deviceDiscovered(const QBluetoothDeviceInfo &device);
+    void deviceDiscoveryFinished(void);
+    void deviceConnected(void);
+    void deviceDisconnected(void);
+
+    void errorDiscovery(QBluetoothDeviceDiscoveryAgent::Error err);
+    void errorSocket(QBluetoothSocket::SocketError err);
 
 signals:
     void finished(int err = OK);
